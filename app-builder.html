@@ -270,6 +270,18 @@
   var history = [];
   var isSending = false; // kunci utama biar gak bisa kirim dobel/spam
 
+  function showDebugError(msg){
+    var bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:10px 14px;font-size:11px;font-family:monospace;z-index:9999;word-break:break-word;box-shadow:0 4px 14px rgba(0,0,0,0.5);';
+    bar.textContent = 'Error: ' + msg;
+    document.body.appendChild(bar);
+    setTimeout(function(){ bar.remove(); }, 10000);
+  }
+  window.addEventListener('error', function(e){ showDebugError(e.message); });
+  window.addEventListener('unhandledrejection', function(e){
+    showDebugError((e.reason && e.reason.message) || String(e.reason));
+  });
+
   function saveHistory(){
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(history)); }catch(e){}
   }
@@ -347,23 +359,35 @@
     var text = promptInput.value.trim();
     if(!text || isSending) return;
 
-    isSending = true;
-    addMessage('user', text);
-    history.push({ role:'user', content: text });
-    saveHistory();
-    promptInput.value = '';
-    autoResize();
-    sendBtn.disabled = true;
-    hideTyping(); // bersihin sisa indikator ketik kalau ada, sebelum nambah yang baru
-    showTyping();
+    try{
+      isSending = true;
+      addMessage('user', text);
+      history.push({ role:'user', content: text });
+      saveHistory();
+      promptInput.value = '';
+      autoResize();
+      sendBtn.disabled = true;
+      hideTyping();
+      showTyping();
+    }catch(err){
+      isSending = false;
+      sendBtn.disabled = false;
+      hideTyping();
+      addMessage('ai', 'Ada error internal: ' + err.message);
+      return;
+    }
+
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function(){ controller.abort(); }, 25000);
 
     fetch('/.netlify/functions/chat', {
       method:'POST',
       headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({ messages: history })
+      body: JSON.stringify({ messages: history }),
+      signal: controller.signal
     })
     .then(function(res){
-      if(!res.ok) throw new Error('bad status');
+      if(!res.ok) throw new Error('Server balas status ' + res.status);
       return res.json();
     })
     .then(function(data){
@@ -373,11 +397,16 @@
       history.push({ role:'assistant', content: reply });
       saveHistory();
     })
-    .catch(function(){
+    .catch(function(err){
       hideTyping();
-      addMessage('ai', 'Maaf, L.ai lagi gangguan koneksi ke server. Coba kirim ulang ya.');
+      if(err && err.name === 'AbortError'){
+        addMessage('ai', 'Maaf, L.ai kelamaan mikir (timeout 25 detik). Coba kirim ulang.');
+      } else {
+        addMessage('ai', 'Maaf, L.ai lagi gangguan: ' + (err && err.message ? err.message : 'gagal terhubung ke server') + '. Coba kirim ulang ya.');
+      }
     })
     .finally(function(){
+      clearTimeout(timeoutId);
       isSending = false;
       sendBtn.disabled = false;
     });
