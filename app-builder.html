@@ -71,9 +71,24 @@
     color:#e9d5ff;
     flex-shrink:0;
   }
-  .brand-text{ line-height:1.25; }
+  .brand-text{ line-height:1.25; flex:1; }
   .brand-text .name{ font-family:'Sora', sans-serif; font-weight:700; font-size:1rem; }
   .brand-text .sub{ font-size:0.72rem; color: var(--text-muted); }
+  .new-chat-btn{
+    display:flex; align-items:center; gap:6px;
+    padding:8px 12px;
+    border-radius:11px;
+    border:1px solid var(--border);
+    background: rgba(255,255,255,0.03);
+    color: var(--text-muted);
+    font-family:'Sora', sans-serif;
+    font-size:0.72rem;
+    font-weight:600;
+    cursor:pointer;
+    flex-shrink:0;
+  }
+  .new-chat-btn:active{ transform: scale(0.95); }
+  .new-chat-btn svg{ width:14px; height:14px; }
 
   main{
     flex:1;
@@ -226,6 +241,10 @@
     <div class="name">L.ai</div>
     <div class="sub">App Builder · by Alex</div>
   </div>
+  <button class="new-chat-btn" id="newChatBtn">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+    Baru
+  </button>
 </header>
 
 <main id="chatWindow"></main>
@@ -243,8 +262,17 @@
   var chatWindow = document.getElementById('chatWindow');
   var promptInput = document.getElementById('promptInput');
   var sendBtn = document.getElementById('sendBtn');
+  var newChatBtn = document.getElementById('newChatBtn');
+
+  var STORAGE_KEY = 'lai_chat_history';
+  var GREETING = 'Halo! Aku L.ai, siap bantu bikin aplikasi Android kamu dari nol sampai siap deploy. Mau bikin aplikasi apa hari ini?';
 
   var history = [];
+  var isSending = false; // kunci utama biar gak bisa kirim dobel/spam
+
+  function saveHistory(){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(history)); }catch(e){}
+  }
 
   function escapeHtml(str){
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -288,8 +316,8 @@
   }
 
   function hideTyping(){
-    var el = document.getElementById('typingIndicator');
-    if(el) el.remove();
+    var els = document.querySelectorAll('.typing');
+    els.forEach(function(el){ el.remove(); });
   }
 
   function autoResize(){
@@ -300,21 +328,33 @@
   promptInput.addEventListener('keydown', function(e){
     if(e.key === 'Enter' && !e.shiftKey){
       e.preventDefault();
+      if(isSending) return; // cegah spam via tombol Enter/Go di keyboard HP
       handleSend();
     }
   });
 
-  sendBtn.addEventListener('click', handleSend);
+  sendBtn.addEventListener('click', function(){
+    if(isSending) return;
+    handleSend();
+  });
+
+  newChatBtn.addEventListener('click', function(){
+    if(isSending) return;
+    startNewChat();
+  });
 
   function handleSend(){
     var text = promptInput.value.trim();
-    if(!text) return;
+    if(!text || isSending) return;
 
+    isSending = true;
     addMessage('user', text);
     history.push({ role:'user', content: text });
+    saveHistory();
     promptInput.value = '';
     autoResize();
     sendBtn.disabled = true;
+    hideTyping(); // bersihin sisa indikator ketik kalau ada, sebelum nambah yang baru
     showTyping();
 
     fetch('/.netlify/functions/chat', {
@@ -331,17 +371,37 @@
       var reply = data.reply || 'Maaf, L.ai belum bisa menjawab itu sekarang.';
       addMessage('ai', reply);
       history.push({ role:'assistant', content: reply });
-      sendBtn.disabled = false;
+      saveHistory();
     })
     .catch(function(){
       hideTyping();
       addMessage('ai', 'Maaf, L.ai lagi gangguan koneksi ke server. Coba kirim ulang ya.');
+    })
+    .finally(function(){
+      isSending = false;
       sendBtn.disabled = false;
     });
   }
 
-  // sapaan awal
-  addMessage('ai', 'Halo! Aku L.ai, siap bantu bikin aplikasi Android kamu dari nol sampai siap deploy. Mau bikin aplikasi apa hari ini?');
+  function startNewChat(){
+    history = [];
+    localStorage.removeItem(STORAGE_KEY);
+    chatWindow.innerHTML = '';
+    addMessage('ai', GREETING);
+  }
+
+  // muat riwayat chat dari localStorage (kalau ada), lalu tampilkan sapaan + riwayatnya
+  (function init(){
+    try{
+      var saved = localStorage.getItem(STORAGE_KEY);
+      if(saved) history = JSON.parse(saved) || [];
+    }catch(e){ history = []; }
+
+    addMessage('ai', GREETING);
+    history.forEach(function(m){
+      addMessage(m.role === 'user' ? 'user' : 'ai', m.content);
+    });
+  })();
 </script>
 
 </body>
